@@ -37,6 +37,15 @@ bool replaceCol = true;                       //Change to 'true' to set the mode
 float lightPosn[4] = { 0, 50, 50, 1 };         //Default light's position
 bool twoSidedLight = false;                    //Change to 'true' to enable two-sided lighting
 
+struct meshInit
+{
+    int mNumVertices;
+    aiVector3D* mVertices;
+    aiVector3D* mNormals;
+};
+
+meshInit* initData;
+
 //-------Loads model data from file and creates a scene object----------
 bool loadModel(const char* fileName)
 {
@@ -47,6 +56,17 @@ bool loadModel(const char* fileName)
     //printTreeInfo(scene->mRootNode);
     //printBoneInfo(scene);
     //printAnimInfo(scene);  //WARNING:  This may generate a lengthy output if the model has animation data
+    
+    initData = new meshInit[scene->mNumMeshes];
+    for (int i = 0; i < scene->mNumMeshes; i++)
+    {
+        aiMesh mesh = scene->mMeshes[i];
+        (initData + i)->mNumVertices = mesh->mNumVertices;
+        (initData + i)->mVertices = new aiVector3D[numVert];
+        (initData + i)->mNormals = new aiVector3D[numVert];
+        //Populate the above two arrays with mesh data.
+    }
+    
     get_bounding_box(scene, &scene_min, &scene_max);
     return true;
 }
@@ -206,7 +226,7 @@ void initialise()
     glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 50);
     glColor4fv(materialCol);
     loadModel("dwarf.x"); //<<<-------------Specify input file name here
-    loadModel("avatar_walk.bvh");
+    //loadModel("avatar_walk.bvh"); Load as its own scene.... create a new function
     loadGLTextures(scene);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
@@ -227,11 +247,13 @@ void updateNodeMatrices(int tick)
         matRot = aiMatrix4x4();
         aiNodeAnim* ndAnim = anim->mChannels[i]; //Channel
         
+        // Posn Key
         if (ndAnim->mNumPositionKeys > 1) index = tick;
         else index = 0;
         aiVector3D posn = (ndAnim->mPositionKeys[index]).mValue;
         matPos.Translation(posn, matPos);
         
+        // Rotn Key
         if (ndAnim->mNumRotationKeys > 1) index = tick;
         else index = 0;
         aiQuaternion rotn = (ndAnim->mRotationKeys[index]).mValue;
@@ -241,7 +263,54 @@ void updateNodeMatrices(int tick)
         matProd = matPos * matRot;
         nd = scene->mRootNode->FindNode(ndAnim->mNodeName);
         nd->mTransformation = matProd;
+        
+        transformVertices();
     }
+}
+
+void transformVertices()
+{
+    
+    for (int i = 0; i < scene->mNumMeshes; i++)
+    {
+        aiMesh mesh = scene->mMeshes[i];
+        for (int j = 0; j < mesh->mNumBones; j++)
+        {
+            aiBone bone = mesh->mBones[j];
+            aiMatrix4x4 limatrix = bone->mOffsetMatrix;
+            aiNode node = scene->mRootNode->FindNode(bone->mName);
+            milist = [];
+            while(node->mParent != NULL) {
+                aiMatrix4x4 qamatrix = node->mTransformation;
+                //Get all of the nodes up to the parent and make a list somehow 
+                node = node->mParent;
+            }
+            //Form the matrix product of all of those notes
+            aiMatrix4x4 mimatrix = milist.matrix();
+            //Form the normal matrix.
+            aiMatrix4x4 normalMatrix = Transpose(mimatrix);
+            
+            int vid = (bone->mWeights[k]).mVertexId;
+            aiVector3D vert = (initData + mesh)->mVertices[vid];
+            aiVector3D norm = (initData + mesh)->mNormals[vid];
+            
+            mesh->mVertices[vid] =
+            mesh->mNormals[vid] =
+        }
+    }
+    
+    
+    aiBone bone = mesh->mBones[i];
+    aiMatrix4x4 matrix = bone->mOffsetMatrix
+    aiString string = bone->mName
+    int id = (bone->mWeights[k]).mVertexId;
+    float weight = (bone->mWeights[k]).mWeight;
+    
+    //~ vid = (bone->mWeights[k]).mVertexId;
+    //~ vert = (initData + imesh)->mVertices[vid];
+    //~ norm = (initData + imesh)->mNormals[vid];
+    //~ mesh->mVertices[vid] =
+    //~ mesh->mNormals[vid] =
 }
 
 void update(int value)
@@ -346,7 +415,7 @@ int main(int argc, char** argv)
 
     initialise();
     glutDisplayFunc(display);
-    glutTimerFunc(50, update, 0);
+    glutTimerFunc(timeStep, update, 0);
     glutKeyboardFunc(keyboard);
     glutMainLoop();
 

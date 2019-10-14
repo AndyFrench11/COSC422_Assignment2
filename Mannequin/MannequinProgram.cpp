@@ -19,7 +19,8 @@ using namespace std;
 #include "assimp_extras.h"
 
 //----------Globals----------------------------
-const aiScene* scene = NULL;
+const aiScene* modelScene = NULL;
+const aiScene* animationScene = NULL;
 float angle = 0;
 aiVector3D scene_min, scene_max, scene_center;
 bool modelRotn = true;
@@ -29,7 +30,6 @@ std::map<int, int> texIdMap;
 int tDuration; //Animation duration in ticks.
 int currTick = 0; //current tick
 float timeStep = 50; //Animation time step = 50 m.sec
-bool animationActive = false;
 
 //------------Modify the following as needed----------------------
 float materialCol[4] = { 0.5, 0.4, 0.3, 1 };   //Default material colour (not used if model's colour is available)
@@ -40,72 +40,32 @@ bool twoSidedLight = false;                    //Change to 'true' to enable two-
 //-------Loads model data from file and creates a scene object----------
 bool loadModel(const char* fileName)
 {
-    scene = aiImportFile(fileName, aiProcessPreset_TargetRealtime_MaxQuality | aiProcess_Debone);
-    if(scene == NULL) exit(1);
-    printSceneInfo(scene);
-    printMeshInfo(scene);
-    printTreeInfo(scene->mRootNode);
-    printBoneInfo(scene);
-    printAnimInfo(scene);  //WARNING:  This may generate a lengthy output if the model has animation data
-    get_bounding_box(scene, &scene_min, &scene_max);
+    modelScene = aiImportFile(fileName, aiProcessPreset_TargetRealtime_MaxQuality);
+    if(modelScene == NULL) exit(1);
+    //printSceneInfo(modelScene);
+    //printMeshInfo(modelScene);
+    //printTreeInfo(modelScene->mRootNode);
+    //printBoneInfo(modelScene);
+    //printAnimInfo(modelScene);  //WARNING:  This may generate a lengthy output if the model has animation data
+    get_bounding_box(modelScene, &scene_min, &scene_max);
     return true;
 }
 
-//-------------Loads texture files using DevIL library-------------------------------
-void loadGLTextures(const aiScene* scene)
+//-------Loads model data from file and creates a scene object----------
+bool loadAnimation(const char* fileName)
 {
-    /* initialization of DevIL */
-    ilInit();
-    if (scene->HasTextures())
-    {
-        std::cout << "Support for meshes with embedded textures is not implemented" << endl;
-        return;
-    }
-
-    /* scan scene's materials for textures */
-    /* Simplified version: Retrieves only the first texture with index 0 if present*/
-    for (unsigned int m = 0; m < scene->mNumMaterials; ++m)
-    {
-        aiString path;  // filename
-
-        if (scene->mMaterials[m]->GetTexture(aiTextureType_DIFFUSE, 0, &path) == AI_SUCCESS)
-        {
-            glEnable(GL_TEXTURE_2D);
-            ILuint imageId;
-            GLuint texId;
-            ilGenImages(1, &imageId);
-            glGenTextures(1, &texId);
-            texIdMap[m] = texId;   //store tex ID against material id in a hash map
-            ilBindImage(imageId); /* Binding of DevIL image name */
-            ilEnable(IL_ORIGIN_SET);
-            ilOriginFunc(IL_ORIGIN_LOWER_LEFT);
-            if (ilLoadImage((ILstring)path.data))   //if success
-            {
-                /* Convert image to RGBA */
-                ilConvertImage(IL_RGBA, IL_UNSIGNED_BYTE);
-
-                /* Create and load textures to OpenGL */
-                glBindTexture(GL_TEXTURE_2D, texId);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ilGetInteger(IL_IMAGE_WIDTH),
-                    ilGetInteger(IL_IMAGE_HEIGHT), 0, GL_RGBA, GL_UNSIGNED_BYTE,
-                    ilGetData());
-                glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-                cout << "Texture:" << path.data << " successfully loaded." << endl;
-                glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-                glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-                glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
-                glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
-            }
-            else
-            {
-                cout << "Couldn't load Image: " << path.data << endl;
-            }
-        }
-    }  //loop for material
-
+    animationScene = aiImportFile(fileName, aiProcessPreset_TargetRealtime_MaxQuality | aiProcess_Debone);
+    tDuration = animationScene->mAnimations[0]->mDuration;
+    if(animationScene == NULL) exit(1);
+    //printSceneInfo(animationScene);
+    //printMeshInfo(animationScene);
+    //printTreeInfo(animationScene->mRootNode);
+    //printBoneInfo(animationScene);
+    printAnimInfo(animationScene);  //WARNING:  This may generate a lengthy output if the model has animation data
+    //get_bounding_box(animationScene, &scene_min, &scene_max);
+    return true;
 }
+
 
 // ------A recursive function to traverse scene graph and render each mesh----------
 void render (const aiScene* sc, const aiNode* nd)
@@ -126,7 +86,7 @@ void render (const aiScene* sc, const aiNode* nd)
     for (int n = 0; n < nd->mNumMeshes; n++)
     {
         meshIndex = nd->mMeshes[n];          //Get the mesh indices from the current node
-        mesh = scene->mMeshes[meshIndex];    //Using mesh index, get the mesh object
+        mesh = modelScene->mMeshes[meshIndex];    //Using mesh index, get the mesh object
 
         materialIndex = mesh->mMaterialIndex;  //Get material index attached to the mesh
         mtl = sc->mMaterials[materialIndex];
@@ -206,10 +166,9 @@ void initialise()
     glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 50);
     glColor4fv(materialCol);
     loadModel("mannequin.fbx"); 
-    //loadModel("run.fbx"); 
-    //loadModel("Dance.bvh"); 
+    loadAnimation("run.fbx");
            //<<<-------------Specify input file name here
-    loadGLTextures(scene);
+    //loadGLTextures(scene);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     gluPerspective(35, 1, 1.0, 1000.0);
@@ -218,7 +177,7 @@ void initialise()
 void updateNodeMatrices(int tick)
 {
     int index;
-    aiAnimation* anim = scene->mAnimations[0];
+    aiAnimation* anim = animationScene->mAnimations[0];
     aiMatrix4x4 matPos, matRot, matProd;
     aiMatrix3x3 matRot3;
     aiNode* nd;
@@ -241,19 +200,22 @@ void updateNodeMatrices(int tick)
         matRot = aiMatrix4x4(matRot3);
     
         matProd = matPos * matRot;
-        nd = scene->mRootNode->FindNode(ndAnim->mNodeName);
+        nd = animationScene->mRootNode->FindNode(ndAnim->mNodeName);
         nd->mTransformation = matProd;
     }
 }
 
 void update(int value)
 {
-    tDuration = scene->mAnimations[0]->mDuration;
-    if (currTick < tDuration)
+    printf("tDuration %i", tDuration);
+    if (currTick <= tDuration)
     {
+        printf("currTick %i", currTick);
         updateNodeMatrices(currTick);
         glutTimerFunc(timeStep, update, 0);
         currTick++;
+    } else {
+        currTick = 0;
     }
     
     glutPostRedisplay();
@@ -328,7 +290,7 @@ void display()
     
     drawFloor();
 
-    render(scene, scene->mRootNode);
+    render(modelScene, modelScene->mRootNode);
     
     glutSwapBuffers();
 }
@@ -346,10 +308,10 @@ int main(int argc, char** argv)
 
     initialise();
     glutDisplayFunc(display);
-    //glutTimerFunc(timeStep, update, 0);
+    glutTimerFunc(timeStep, update, 0);
     glutKeyboardFunc(keyboard);
     glutMainLoop();
 
-    aiReleaseImport(scene);
+    aiReleaseImport(modelScene);
 }
 

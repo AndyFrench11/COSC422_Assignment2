@@ -65,12 +65,9 @@ void loadGLTextures(const aiScene* scene)
     {
         aiString path;  // filename
         
-        //string path = paths[m];
         
         if (scene->mMaterials[m]->GetTexture(aiTextureType_DIFFUSE, 0, &path) == AI_SUCCESS)
-        {
-            path->data = paths[m];
-            
+        {   
             glEnable(GL_TEXTURE_2D);
             ILuint imageId;
             GLuint texId;
@@ -80,8 +77,13 @@ void loadGLTextures(const aiScene* scene)
             ilBindImage(imageId); /* Binding of DevIL image name */
             ilEnable(IL_ORIGIN_SET);
             ilOriginFunc(IL_ORIGIN_LOWER_LEFT);
-            if (ilLoadImage((ILstring)path.data))   //if success
-            {
+            
+            std::string string(path.C_Str());
+            std::string proper_path = string.substr(string.rfind("/") + 1, string.length());
+            
+            
+            if (ilLoadImage((ILstring)proper_path.c_str())) { //if success
+            
                 /* Convert image to RGBA */
                 ilConvertImage(IL_RGBA, IL_UNSIGNED_BYTE);
 
@@ -93,7 +95,7 @@ void loadGLTextures(const aiScene* scene)
                     ilGetInteger(IL_IMAGE_HEIGHT), 0, GL_RGBA, GL_UNSIGNED_BYTE,
                     ilGetData());
                 glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-                cout << "Texture:" << path.data << " successfully loaded." << endl;
+                cout << "Texture:" << proper_path.c_str() << " successfully loaded." << endl;
                 glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
                 glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
                 glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
@@ -101,7 +103,7 @@ void loadGLTextures(const aiScene* scene)
             }
             else
             {
-                cout << "Couldn't load Image: " << path.data << endl;
+                cout << "Couldn't load Image: " << proper_path.c_str() << endl;
             }
         }
     }  //loop for material
@@ -283,8 +285,6 @@ void display()
     drawFloor();
 
     render(scene, scene->mRootNode);
-    
-    
 
     glutSwapBuffers();
 }
