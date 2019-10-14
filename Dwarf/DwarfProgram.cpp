@@ -25,6 +25,12 @@ aiVector3D scene_min, scene_max, scene_center;
 bool modelRotn = true;
 std::map<int, int> texIdMap;
 
+//---------Animation Variables-----------------
+int tDuration; //Animation duration in ticks.
+int currTick = 0; //current tick
+float timeStep = 50; //Animation time step = 50 m.sec
+bool animationActive = false;
+
 //------------Modify the following as needed----------------------
 float materialCol[4] = { 0.9, 0.9, 0.9, 1 };   //Default material colour (not used if model's colour is available)
 bool replaceCol = true;                       //Change to 'true' to set the model's colour to the above colour
@@ -34,7 +40,7 @@ bool twoSidedLight = false;                    //Change to 'true' to enable two-
 //-------Loads model data from file and creates a scene object----------
 bool loadModel(const char* fileName)
 {
-    scene = aiImportFile(fileName, aiProcessPreset_TargetRealtime_MaxQuality);
+    scene = aiImportFile(fileName, aiProcessPreset_TargetRealtime_MaxQuality | aiProcess_Debone);
     if(scene == NULL) exit(1);
     //printSceneInfo(scene);
     //printMeshInfo(scene);
@@ -199,21 +205,66 @@ void initialise()
     glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, white);
     glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 50);
     glColor4fv(materialCol);
-    loadModel("dwarf.x");         //<<<-------------Specify input file name here
+    loadModel("dwarf.x"); //<<<-------------Specify input file name here
+    loadModel("avatar_walk.bvh");
     loadGLTextures(scene);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     gluPerspective(35, 1, 1.0, 1000.0);
 }
 
-//----Timer callback for continuous rotation of the model about y-axis----
+void updateNodeMatrices(int tick)
+{
+    int index;
+    aiAnimation* anim = scene->mAnimations[0];
+    aiMatrix4x4 matPos, matRot, matProd;
+    aiMatrix3x3 matRot3;
+    aiNode* nd;
+    
+    for (int i = 0; i < anim->mNumChannels; i++)
+    {
+        matPos = aiMatrix4x4(); //Identity
+        matRot = aiMatrix4x4();
+        aiNodeAnim* ndAnim = anim->mChannels[i]; //Channel
+        
+        if (ndAnim->mNumPositionKeys > 1) index = tick;
+        else index = 0;
+        aiVector3D posn = (ndAnim->mPositionKeys[index]).mValue;
+        matPos.Translation(posn, matPos);
+        
+        if (ndAnim->mNumRotationKeys > 1) index = tick;
+        else index = 0;
+        aiQuaternion rotn = (ndAnim->mRotationKeys[index]).mValue;
+        matRot3 = rotn.GetMatrix();
+        matRot = aiMatrix4x4(matRot3);
+    
+        matProd = matPos * matRot;
+        nd = scene->mRootNode->FindNode(ndAnim->mNodeName);
+        nd->mTransformation = matProd;
+    }
+}
+
 void update(int value)
 {
-    angle++;
-    if(angle > 360) angle = 0;
+    tDuration = scene->mAnimations[0]->mDuration;
+    if (currTick < tDuration)
+    {
+        updateNodeMatrices(currTick);
+        glutTimerFunc(timeStep, update, 0);
+        currTick++;
+    }
+    
     glutPostRedisplay();
-    glutTimerFunc(50, update, 0);
 }
+
+//----Timer callback for continuous rotation of the model about y-axis----
+//~ void update(int value)
+//~ {
+    //~ angle++;
+    //~ if(angle > 360) angle = 0;
+    //~ glutPostRedisplay();
+    //~ glutTimerFunc(50, update, 0);
+//~ }
 
 //----Keyboard callback to toggle initial model orientation---
 void keyboard(unsigned char key, int x, int y)
@@ -254,11 +305,11 @@ void display()
 
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    gluLookAt(0, 0, 3, 0, 0, -5, 0, 1, 0);
+    gluLookAt(0, 0.5, 3, 0, 0, -5, 0, 1, 0);
     glLightfv(GL_LIGHT0, GL_POSITION, lightPosn);
 
-    glRotatef(angle, 0.f, 1.f ,0.f);  //Continuous rotation about the y-axis
-    if(modelRotn) glRotatef(-90, 1, 0, 0);        //First, rotate the model about x-axis if needed.
+    //glRotatef(angle, 0.f, 1.f ,0.f);  //Continuous rotation about the y-axis
+    //if(modelRotn) glRotatef(-90, 1, 0, 0);        //First, rotate the model about x-axis if needed.
 
     // scale the whole asset to fit into our view frustum 
     float tmp = scene_max.x - scene_min.x;
