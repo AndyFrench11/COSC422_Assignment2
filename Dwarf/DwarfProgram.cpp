@@ -22,14 +22,14 @@ using namespace std;
 const aiScene* scene = NULL;
 float angle = 0;
 aiVector3D scene_min, scene_max, scene_center;
-bool modelRotn = true;
 std::map<int, int> texIdMap;
 
 //---------Animation Variables-----------------
 int tDuration; //Animation duration in ticks.
 int currTick = 0; //current tick
 float timeStep = 50; //Animation time step = 50 m.sec
-bool animationActive = false;
+bool embeddedAnimation = false;
+bool reTargetedAnimation = false;
 
 //------------Modify the following as needed----------------------
 float materialCol[4] = { 0.9, 0.9, 0.9, 1 };   //Default material colour (not used if model's colour is available)
@@ -49,7 +49,7 @@ meshInit* initData;
 //-------Loads model data from file and creates a scene object----------
 bool loadModel(const char* fileName)
 {
-    scene = aiImportFile(fileName, aiProcessPreset_TargetRealtime_MaxQuality | aiProcess_Debone);
+    scene = aiImportFile(fileName, aiProcessPreset_TargetRealtime_MaxQuality);
     if(scene == NULL) exit(1);
     //printSceneInfo(scene);
     //printMeshInfo(scene);
@@ -58,13 +58,20 @@ bool loadModel(const char* fileName)
     //printAnimInfo(scene);  //WARNING:  This may generate a lengthy output if the model has animation data
     
     initData = new meshInit[scene->mNumMeshes];
+    
     for (int i = 0; i < scene->mNumMeshes; i++)
     {
-        aiMesh mesh = scene->mMeshes[i];
+        aiMesh* mesh = scene->mMeshes[i];
         (initData + i)->mNumVertices = mesh->mNumVertices;
-        (initData + i)->mVertices = new aiVector3D[numVert];
-        (initData + i)->mNormals = new aiVector3D[numVert];
-        //Populate the above two arrays with mesh data.
+        (initData + i)->mVertices = new aiVector3D[mesh->mNumVertices];
+        (initData + i)->mNormals = new aiVector3D[mesh->mNumVertices];
+        
+        for (int j = 0; j < mesh->mNumVertices; j++)
+        {
+            (initData + i)->mVertices[j] = mesh->mVertices[j];
+            (initData + i)->mNormals[j] = mesh->mNormals[j];
+        }
+        
     }
     
     get_bounding_box(scene, &scene_min, &scene_max);
@@ -187,6 +194,12 @@ void render (const aiScene* sc, const aiNode* nd)
                     glTexCoord2f (mesh->mTextureCoords[0][vertexIndex].x, mesh->mTextureCoords[0][vertexIndex].y );
                     
                 }
+                
+                //~ if (mesh->HasTextureCoords(1)) {
+                    
+                    //~ glTexCoord2f (mesh->mTextureCoords[1][vertexIndex].x, mesh->mTextureCoords[1][vertexIndex].y );
+                    
+                //~ }
 
                 if (mesh->HasNormals())
                     glNormal3fv(&mesh->mNormals[vertexIndex].x);
@@ -233,6 +246,44 @@ void initialise()
     gluPerspective(35, 1, 1.0, 1000.0);
 }
 
+void transformVertices()
+{
+    
+    for (int i = 0; i < scene->mNumMeshes; i++)
+    {
+        aiMesh* mesh = scene->mMeshes[i];
+        for (int j = 0; j < mesh->mNumBones; j++)
+        {
+            aiBone* bone = mesh->mBones[j];
+            aiMatrix4x4 limatrix = bone->mOffsetMatrix;
+            aiNode* node = scene->mRootNode->FindNode(bone->mName);
+            aiMatrix4x4 mimatrix = limatrix;
+            
+            while(node->mParent != NULL) {
+                aiMatrix4x4 qamatrix = node->mTransformation;
+                mimatrix = qamatrix * mimatrix;
+                node = node->mParent;
+            }
+            //Form the normal matrix.
+            aiMatrix4x4 normalMatrix = mimatrix;
+            normalMatrix.Inverse().Transpose();
+            
+            for(int k = 0; k < bone->mNumWeights; k++)
+            {
+                aiVertexWeight weight = bone->mWeights[k];
+                int vid = weight.mVertexId;
+                
+                aiVector3D vert = (initData + i)->mVertices[vid];
+                aiVector3D norm = (initData + i)->mNormals[vid];
+                
+                //Make a 3x3 of the matrix and multiply it by the 3d vector
+                mesh->mVertices[vid] = aiMatrix3x3(mimatrix) * vert;
+                mesh->mNormals[vid] = aiMatrix3x3(normalMatrix) * norm;
+            }
+        }
+    }
+}
+
 void updateNodeMatrices(int tick)
 {
     int index;
@@ -245,84 +296,73 @@ void updateNodeMatrices(int tick)
     {
         matPos = aiMatrix4x4(); //Identity
         matRot = aiMatrix4x4();
-        aiNodeAnim* ndAnim = anim->mChannels[i]; //Channel
+        aiNodeAnim* channel = anim->mChannels[i]; //Channel
         
-        // Posn Key
-        if (ndAnim->mNumPositionKeys > 1) index = tick;
+        // Position Keys
+        if (channel->mNumPositionKeys > 1) index = tick;
         else index = 0;
-        aiVector3D posn = (ndAnim->mPositionKeys[index]).mValue;
+        aiVector3D posn = (channel->mPositionKeys[index]).mValue;
+        
+        for (int positionIndex = 0; positionIndex < channel->mNumPositionKeys; positionIndex++)
+        {
+            if((channel->mPositionKeys[positionIndex-1].mTime < tick) && (tick <= channel->mPositionKeys[positionIndex].mTime)) {
+                aiVector3D   pos1 = (channel->mPositionKeys[positionIndex-1]).mValue;
+                aiVector3D   pos2 = (channel->mPositionKeys[positionIndex]).mValue;
+                double time1 = (channel->mPositionKeys[positionIndex-1]).mTime;
+                double time2 = (channel->mPositionKeys[positionIndex]).mTime;
+                float factor = (tick-time1)/(time2-time1);
+                posn = pos2 - pos1;
+                posn = pos1 + (factor * posn);
+            }
+        }
         matPos.Translation(posn, matPos);
         
-        // Rotn Key
-        if (ndAnim->mNumRotationKeys > 1) index = tick;
+        
+        // Rotation Keys
+        if (channel->mNumRotationKeys > 1) index = tick;
         else index = 0;
-        aiQuaternion rotn = (ndAnim->mRotationKeys[index]).mValue;
+        aiQuaternion rotn = (channel->mRotationKeys[index]).mValue;
+        
+        for (int rotationIndex = 0; rotationIndex < channel->mNumRotationKeys; rotationIndex++)
+        {
+            if((channel->mRotationKeys[rotationIndex-1].mTime < tick) && (tick <= channel->mRotationKeys[rotationIndex].mTime)) {
+                aiQuaternion rotn1 = (channel->mRotationKeys[rotationIndex-1]).mValue;
+                aiQuaternion rotn2 = (channel->mRotationKeys[rotationIndex]).mValue;
+                double time1 = (channel->mRotationKeys[rotationIndex-1]).mTime;
+                double time2 = (channel->mRotationKeys[rotationIndex]).mTime;
+                double factor = (tick-time1)/(time2-time1);
+                rotn.Interpolate(rotn, rotn1, rotn2, factor);
+            }
+        }
         matRot3 = rotn.GetMatrix();
         matRot = aiMatrix4x4(matRot3);
-    
-        matProd = matPos * matRot;
-        nd = scene->mRootNode->FindNode(ndAnim->mNodeName);
-        nd->mTransformation = matProd;
         
-        transformVertices();
+        
+        matProd = matPos * matRot;
+        nd = scene->mRootNode->FindNode(channel->mNodeName);
+        nd->mTransformation = matProd;
     }
-}
-
-void transformVertices()
-{
-    
-    for (int i = 0; i < scene->mNumMeshes; i++)
-    {
-        aiMesh mesh = scene->mMeshes[i];
-        for (int j = 0; j < mesh->mNumBones; j++)
-        {
-            aiBone bone = mesh->mBones[j];
-            aiMatrix4x4 limatrix = bone->mOffsetMatrix;
-            aiNode node = scene->mRootNode->FindNode(bone->mName);
-            milist = [];
-            while(node->mParent != NULL) {
-                aiMatrix4x4 qamatrix = node->mTransformation;
-                //Get all of the nodes up to the parent and make a list somehow 
-                node = node->mParent;
-            }
-            //Form the matrix product of all of those notes
-            aiMatrix4x4 mimatrix = milist.matrix();
-            //Form the normal matrix.
-            aiMatrix4x4 normalMatrix = Transpose(mimatrix);
-            
-            int vid = (bone->mWeights[k]).mVertexId;
-            aiVector3D vert = (initData + mesh)->mVertices[vid];
-            aiVector3D norm = (initData + mesh)->mNormals[vid];
-            
-            mesh->mVertices[vid] =
-            mesh->mNormals[vid] =
-        }
-    }
-    
-    
-    aiBone bone = mesh->mBones[i];
-    aiMatrix4x4 matrix = bone->mOffsetMatrix
-    aiString string = bone->mName
-    int id = (bone->mWeights[k]).mVertexId;
-    float weight = (bone->mWeights[k]).mWeight;
-    
-    //~ vid = (bone->mWeights[k]).mVertexId;
-    //~ vert = (initData + imesh)->mVertices[vid];
-    //~ norm = (initData + imesh)->mNormals[vid];
-    //~ mesh->mVertices[vid] =
-    //~ mesh->mNormals[vid] =
+    transformVertices();
 }
 
 void update(int value)
 {
-    tDuration = scene->mAnimations[0]->mDuration;
-    if (currTick < tDuration)
-    {
-        updateNodeMatrices(currTick);
-        glutTimerFunc(timeStep, update, 0);
-        currTick++;
-    }
+    if(embeddedAnimation) {
     
+        tDuration = scene->mAnimations[0]->mDuration;
+        if (currTick < tDuration)
+        {
+            updateNodeMatrices(currTick);
+            glutTimerFunc(timeStep, update, 0);
+            currTick++;
+        } 
+    } else if(reTargetedAnimation) {
+        //Do the retargeted animation!
+        glutTimerFunc(timeStep, update, 0);
+    
+    } else {
+        glutTimerFunc(timeStep, update, 0);
+    }
     glutPostRedisplay();
 }
 
@@ -338,8 +378,8 @@ void update(int value)
 //----Keyboard callback to toggle initial model orientation---
 void keyboard(unsigned char key, int x, int y)
 {
-    if(key == '1') modelRotn = !modelRotn;  //Enable/disable initial model rotation
-    if(key == '2') modelRotn = !modelRotn;  //Enable/disable initial model rotation 
+    if(key == '1') embeddedAnimation = !embeddedAnimation; 
+    if(key == '2') reTargetedAnimation = !reTargetedAnimation;  //Enable/disable initial model rotation 
     glutPostRedisplay();
 }
 
@@ -374,7 +414,7 @@ void display()
 
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    gluLookAt(0, 0.5, 3, 0, 0, -5, 0, 1, 0);
+    gluLookAt(0, 0, 3, 0, 0, -5, 0, 1, 0);
     glLightfv(GL_LIGHT0, GL_POSITION, lightPosn);
 
     //glRotatef(angle, 0.f, 1.f ,0.f);  //Continuous rotation about the y-axis
@@ -396,8 +436,6 @@ void display()
     drawFloor();
 
     render(scene, scene->mRootNode);
-    
-    
 
     glutSwapBuffers();
 }
