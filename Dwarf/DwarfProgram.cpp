@@ -36,9 +36,16 @@ float radius = 3, angle=0, look_x, look_y = 0, look_z=0, eye_x = 0, eye_y = 0, e
 
 //------------Modify the following as needed----------------------
 float materialCol[4] = { 0.9, 0.9, 0.9, 1 };   //Default material colour (not used if model's colour is available)
+float defaultColor[4] = { 0.5, 0.2, 0.7, 1 };
 bool replaceCol = true;                       //Change to 'true' to set the model's colour to the above colour
 float lightPosn[4] = { 0, 50, 50, 1 };         //Default light's position
 bool twoSidedLight = false;                    //Change to 'true' to enable two-sided lighting
+float shadowMatrix[16] = 
+{ 
+    50,0,0,0, 
+    0,0,-50,-1, 
+    0,0,50,0, 
+    0,0,0,50 };
 
 struct meshInit
 {
@@ -74,7 +81,6 @@ bool loadModel(const char* fileName)
             (initData + i)->mVertices[j] = mesh->mVertices[j];
             (initData + i)->mNormals[j] = mesh->mNormals[j];
         }
-        
     }
     
     get_bounding_box(scene, &scene_min, &scene_max);
@@ -180,7 +186,7 @@ void render (const aiScene* sc, const aiNode* nd)
             glBindTexture(GL_TEXTURE_2D, texIdMap[materialIndex]);
         }
         
-        if (replaceCol)
+        if (replaceCol) 
             glColor4fv(materialCol);   //User-defined colour
         else if (AI_SUCCESS == aiGetMaterialColor(mtl, AI_MATKEY_COLOR_DIFFUSE, &diffuse))  //Get material colour from model
             glColor4f(diffuse.r, diffuse.g, diffuse.b, 1.0);
@@ -206,10 +212,12 @@ void render (const aiScene* sc, const aiNode* nd)
 
             for(int i = 0; i < face->mNumIndices; i++) {
                 int vertexIndex = face->mIndices[i]; 
-                glTexCoord2f (mesh->mTextureCoords[0][vertexIndex].x, mesh->mTextureCoords[0][vertexIndex].y );
 
                 if(mesh->HasVertexColors(0))
                     glColor4fv((GLfloat*)&mesh->mColors[0][vertexIndex]);
+                    
+                if(mesh->HasTextureCoords(0)) 
+                    glTexCoord2f (mesh->mTextureCoords[0][vertexIndex].x, mesh->mTextureCoords[0][vertexIndex].y );
 
                 if (mesh->HasNormals())
                     glNormal3fv(&mesh->mNormals[vertexIndex].x);
@@ -247,9 +255,8 @@ void initialise()
     glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
     glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, white);
     glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 50);
-    glColor4fv(materialCol);
     loadModel("dwarf.x"); //<<<-------------Specify input file name here
-    loadAnimation("avatar_walk.bvh");
+    //loadAnimation("avatar_walk.bvh");
     loadGLTextures(scene);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
@@ -393,15 +400,6 @@ void update(int value)
     glutPostRedisplay();
 }
 
-//----Timer callback for continuous rotation of the model about y-axis----
-//~ void update(int value)
-//~ {
-    //~ angle++;
-    //~ if(angle > 360) angle = 0;
-    //~ glutPostRedisplay();
-    //~ glutTimerFunc(50, update, 0);
-//~ }
-
 //----Keyboard callback to toggle initial model orientation---
 void keyboard(unsigned char key, int x, int y)
 {
@@ -416,7 +414,6 @@ void drawFloor()
 
     glBegin(GL_QUADS);
     glNormal3f(0, 1, 0);
-    glDisable(GL_LIGHTING);
     for(int x = -5000; x <= 5000; x += 50)
     {
         for(int z = -5000; z <= 5000; z += 50)
@@ -462,10 +459,23 @@ void display()
     glTranslatef(-xc, -yc, -zc);
     
     glPushMatrix();
+    glColor4f(1.0, 1.0, 1.0, 1.0);
     drawFloor();
     glPopMatrix();
-
+    
+    glDisable(GL_LIGHTING); //Shadow
+    glPushMatrix();
+    glTranslatef(0, 0.1, 0);
+    glMultMatrixf(shadowMatrix);
+    glColor4f(0.2, 0.2, 0.2, 1.0); 
     render(scene, scene->mRootNode);
+    glPopMatrix();
+
+    glEnable(GL_LIGHTING);
+    glPushMatrix();
+    render(scene, scene->mRootNode);
+    glPopMatrix();
+    
 
     glutSwapBuffers();
 }
