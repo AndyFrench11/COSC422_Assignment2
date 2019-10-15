@@ -20,7 +20,7 @@ using namespace std;
 
 //----------Globals----------------------------
 const aiScene* scene = NULL;
-float angle = 0;
+const aiScene* animationScene = NULL;
 aiVector3D scene_min, scene_max, scene_center;
 std::map<int, int> texIdMap;
 
@@ -30,6 +30,9 @@ int currTick = 0; //current tick
 float timeStep = 50; //Animation time step = 50 m.sec
 bool embeddedAnimation = false;
 bool reTargetedAnimation = false;
+
+//---------Camera Variables--------------------
+float radius = 3, angle=0, look_x, look_y = 0, look_z=0, eye_x = 0, eye_y = 0, eye_z = radius, prev_eye_x = eye_x, prev_eye_z=eye_z;  //Camera parameters
 
 //------------Modify the following as needed----------------------
 float materialCol[4] = { 0.9, 0.9, 0.9, 1 };   //Default material colour (not used if model's colour is available)
@@ -75,6 +78,20 @@ bool loadModel(const char* fileName)
     }
     
     get_bounding_box(scene, &scene_min, &scene_max);
+    return true;
+}
+
+//-------Loads model data from file and creates a scene object----------
+bool loadAnimation(const char* fileName)
+{
+    animationScene = aiImportFile(fileName, aiProcessPreset_TargetRealtime_MaxQuality | aiProcess_Debone);
+    //tDuration = animationScene->mAnimations[0]->mDuration;
+    if(animationScene == NULL) exit(1);
+    //printSceneInfo(animationScene);
+    //printMeshInfo(animationScene);
+    //printTreeInfo(animationScene->mRootNode);
+    //printBoneInfo(animationScene);
+    //printAnimInfo(animationScene);  //WARNING:  This may generate a lengthy output if the model has animation data
     return true;
 }
 
@@ -157,6 +174,12 @@ void render (const aiScene* sc, const aiNode* nd)
 
         materialIndex = mesh->mMaterialIndex;  //Get material index attached to the mesh
         mtl = sc->mMaterials[materialIndex];
+        
+        if(mesh->HasTextureCoords(0)) {
+            glEnable(GL_TEXTURE);
+            glBindTexture(GL_TEXTURE_2D, texIdMap[materialIndex]);
+        }
+        
         if (replaceCol)
             glColor4fv(materialCol);   //User-defined colour
         else if (AI_SUCCESS == aiGetMaterialColor(mtl, AI_MATKEY_COLOR_DIFFUSE, &diffuse))  //Get material colour from model
@@ -183,23 +206,10 @@ void render (const aiScene* sc, const aiNode* nd)
 
             for(int i = 0; i < face->mNumIndices; i++) {
                 int vertexIndex = face->mIndices[i]; 
+                glTexCoord2f (mesh->mTextureCoords[0][vertexIndex].x, mesh->mTextureCoords[0][vertexIndex].y );
 
                 if(mesh->HasVertexColors(0))
                     glColor4fv((GLfloat*)&mesh->mColors[0][vertexIndex]);
-
-                //Assign texture coordinates here
-                
-                if (mesh->HasTextureCoords(0)) {
-                    
-                    glTexCoord2f (mesh->mTextureCoords[0][vertexIndex].x, mesh->mTextureCoords[0][vertexIndex].y );
-                    
-                }
-                
-                //~ if (mesh->HasTextureCoords(1)) {
-                    
-                    //~ glTexCoord2f (mesh->mTextureCoords[1][vertexIndex].x, mesh->mTextureCoords[1][vertexIndex].y );
-                    
-                //~ }
 
                 if (mesh->HasNormals())
                     glNormal3fv(&mesh->mNormals[vertexIndex].x);
@@ -239,7 +249,7 @@ void initialise()
     glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 50);
     glColor4fv(materialCol);
     loadModel("dwarf.x"); //<<<-------------Specify input file name here
-    //loadModel("avatar_walk.bvh"); Load as its own scene.... create a new function
+    loadAnimation("avatar_walk.bvh");
     loadGLTextures(scene);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
@@ -277,8 +287,8 @@ void transformVertices()
                 aiVector3D norm = (initData + i)->mNormals[vid];
                 
                 //Make a 3x3 of the matrix and multiply it by the 3d vector
-                mesh->mVertices[vid] = aiMatrix3x3(mimatrix) * vert;
-                mesh->mNormals[vid] = aiMatrix3x3(normalMatrix) * norm;
+                mesh->mVertices[vid] = aiMatrix3x3(mimatrix) * vert + aiVector3D(mimatrix.a4, mimatrix.b4, mimatrix.c4);
+                mesh->mNormals[vid] = aiMatrix3x3(normalMatrix) * norm + aiVector3D(normalMatrix.a4, normalMatrix.b4, normalMatrix.c4);
             }
         }
     }
@@ -286,7 +296,6 @@ void transformVertices()
 
 void updateNodeMatrices(int tick)
 {
-    int index;
     aiAnimation* anim = scene->mAnimations[0];
     aiMatrix4x4 matPos, matRot, matProd;
     aiMatrix3x3 matRot3;
@@ -297,46 +306,59 @@ void updateNodeMatrices(int tick)
         matPos = aiMatrix4x4(); //Identity
         matRot = aiMatrix4x4();
         aiNodeAnim* channel = anim->mChannels[i]; //Channel
+        aiVector3D posn;
         
         // Position Keys
-        if (channel->mNumPositionKeys > 1) index = tick;
-        else index = 0;
-        aiVector3D posn = (channel->mPositionKeys[index]).mValue;
-        
-        for (int positionIndex = 0; positionIndex < channel->mNumPositionKeys; positionIndex++)
-        {
-            if((channel->mPositionKeys[positionIndex-1].mTime < tick) && (tick <= channel->mPositionKeys[positionIndex].mTime)) {
-                aiVector3D   pos1 = (channel->mPositionKeys[positionIndex-1]).mValue;
-                aiVector3D   pos2 = (channel->mPositionKeys[positionIndex]).mValue;
-                double time1 = (channel->mPositionKeys[positionIndex-1]).mTime;
-                double time2 = (channel->mPositionKeys[positionIndex]).mTime;
-                float factor = (tick-time1)/(time2-time1);
-                posn = pos2 - pos1;
-                posn = pos1 + (factor * posn);
+        if (channel->mNumPositionKeys > 1) {
+            for (int positionIndex = 0; positionIndex < channel->mNumPositionKeys; positionIndex++)
+            {
+                if(tick < channel->mPositionKeys[positionIndex].mTime) {
+                    aiVector3D   pos1 = (channel->mPositionKeys[positionIndex-1]).mValue;
+                    aiVector3D   pos2 = (channel->mPositionKeys[positionIndex]).mValue;
+                    double time1 = (channel->mPositionKeys[positionIndex-1]).mTime;
+                    double time2 = (channel->mPositionKeys[positionIndex]).mTime;
+                    float factor = (tick-time1)/(time2-time1);
+                    posn = pos2 - pos1;
+                    posn = pos1 + (factor * posn);
+                    break;
+                } else if(tick == channel->mPositionKeys[positionIndex].mTime) {
+                    posn = (channel->mPositionKeys[positionIndex]).mValue;
+                    break;
+                }
             }
+            matPos.Translation(posn, matPos);
+        } else {
+            posn = (channel->mPositionKeys[0]).mValue;
+            matPos.Translation(posn, matPos);
         }
-        matPos.Translation(posn, matPos);
         
+        aiQuaternion rotn;
         
         // Rotation Keys
-        if (channel->mNumRotationKeys > 1) index = tick;
-        else index = 0;
-        aiQuaternion rotn = (channel->mRotationKeys[index]).mValue;
+        if (channel->mNumRotationKeys > 1) {
         
-        for (int rotationIndex = 0; rotationIndex < channel->mNumRotationKeys; rotationIndex++)
-        {
-            if((channel->mRotationKeys[rotationIndex-1].mTime < tick) && (tick <= channel->mRotationKeys[rotationIndex].mTime)) {
-                aiQuaternion rotn1 = (channel->mRotationKeys[rotationIndex-1]).mValue;
-                aiQuaternion rotn2 = (channel->mRotationKeys[rotationIndex]).mValue;
-                double time1 = (channel->mRotationKeys[rotationIndex-1]).mTime;
-                double time2 = (channel->mRotationKeys[rotationIndex]).mTime;
-                double factor = (tick-time1)/(time2-time1);
-                rotn.Interpolate(rotn, rotn1, rotn2, factor);
+            for (int rotationIndex = 0; rotationIndex < channel->mNumRotationKeys; rotationIndex++)
+            {
+                if(tick < channel->mRotationKeys[rotationIndex].mTime) {
+                    aiQuaternion rotn1 = (channel->mRotationKeys[rotationIndex-1]).mValue;
+                    aiQuaternion rotn2 = (channel->mRotationKeys[rotationIndex]).mValue;
+                    double time1 = (channel->mRotationKeys[rotationIndex-1]).mTime;
+                    double time2 = (channel->mRotationKeys[rotationIndex]).mTime;
+                    float factor = (tick-time1)/(time2-time1);
+                    rotn.Interpolate(rotn, rotn1, rotn2, factor);
+                    break;
+                } else if(tick == channel->mRotationKeys[rotationIndex].mTime) {
+                    rotn = (channel->mRotationKeys[rotationIndex]).mValue; 
+                    break;
+                }
             }
+            matRot3 = rotn.GetMatrix();
+            matRot = aiMatrix4x4(matRot3);
+        } else {
+            rotn = (channel->mRotationKeys[0]).mValue;
+            matRot3 = rotn.GetMatrix();
+            matRot = aiMatrix4x4(matRot3);
         }
-        matRot3 = rotn.GetMatrix();
-        matRot = aiMatrix4x4(matRot3);
-        
         
         matProd = matPos * matRot;
         nd = scene->mRootNode->FindNode(channel->mNodeName);
@@ -356,8 +378,13 @@ void update(int value)
             glutTimerFunc(timeStep, update, 0);
             currTick++;
         } 
+        else {
+            currTick = 0;
+            glutTimerFunc(timeStep, update, 0);
+            embeddedAnimation = false;
+        }
     } else if(reTargetedAnimation) {
-        //Do the retargeted animation!
+        
         glutTimerFunc(timeStep, update, 0);
     
     } else {
@@ -389,6 +416,7 @@ void drawFloor()
 
     glBegin(GL_QUADS);
     glNormal3f(0, 1, 0);
+    glDisable(GL_LIGHTING);
     for(int x = -5000; x <= 5000; x += 50)
     {
         for(int z = -5000; z <= 5000; z += 50)
@@ -414,7 +442,7 @@ void display()
 
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    gluLookAt(0, 0, 3, 0, 0, -5, 0, 1, 0);
+    gluLookAt(eye_x, eye_y, eye_z,  look_x, look_y, look_z,   0, 1, 0);
     glLightfv(GL_LIGHT0, GL_POSITION, lightPosn);
 
     //glRotatef(angle, 0.f, 1.f ,0.f);  //Continuous rotation about the y-axis
@@ -433,11 +461,30 @@ void display()
     // center the model
     glTranslatef(-xc, -yc, -zc);
     
+    glPushMatrix();
     drawFloor();
+    glPopMatrix();
 
     render(scene, scene->mRootNode);
 
     glutSwapBuffers();
+}
+
+void special(int key, int x, int y)
+{   
+    if(key == GLUT_KEY_LEFT) angle -= 0.1;  //Change direction
+    else if(key == GLUT_KEY_RIGHT) angle += 0.1;
+    else if(key == GLUT_KEY_DOWN) radius += 0.1;
+    else if(key == GLUT_KEY_UP) 
+    {
+        if(radius > 1.75) {
+            radius -= 0.1;
+        }
+    }
+    eye_x = radius * sin(angle);
+    eye_z = radius * cos(angle);
+    
+    glutPostRedisplay();
 }
 
 
@@ -455,6 +502,7 @@ int main(int argc, char** argv)
     glutDisplayFunc(display);
     glutTimerFunc(timeStep, update, 0);
     glutKeyboardFunc(keyboard);
+    glutSpecialFunc(special);
     glutMainLoop();
 
     aiReleaseImport(scene);
