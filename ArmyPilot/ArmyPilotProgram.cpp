@@ -32,6 +32,9 @@ float timeStep = 50; //Animation time step = 50 m.sec
 //---------Camera Variables--------------------
 float radius = 3, angle=0, look_x, look_y = 0, look_z=0, eye_x = 0, eye_y = 0, eye_z = radius, prev_eye_x = eye_x, prev_eye_z=eye_z;  //Camera parameters
 
+//---------Floor Variables---------------------
+int z_floor_close = -5000, z_floor_far = 5000;
+
 //------------Modify the following as needed----------------------
 float materialCol[4] = { 0.9, 0.9, 0.9, 1 };   //Default material colour (not used if model's colour is available)
 bool replaceCol = true;                       //Change to 'true' to set the model's colour to the above colour
@@ -251,10 +254,21 @@ void initialise()
 
 void transformVertices()
 {
+    for (int i = 0; i < scene->mNumMeshes; i++)
+    {
+        aiMesh* mesh = scene->mMeshes[i];
+        
+        for (int j = 0; j < mesh->mNumVertices; j++)
+        {
+            mesh->mVertices[j] = aiVector3D(0,0,0);
+            mesh->mNormals[j] = aiVector3D(0,0,0);
+        }
+    }
     
     for (int i = 0; i < scene->mNumMeshes; i++)
     {
         aiMesh* mesh = scene->mMeshes[i];
+        
         for (int j = 0; j < mesh->mNumBones; j++)
         {
             aiBone* bone = mesh->mBones[j];
@@ -280,8 +294,8 @@ void transformVertices()
                 aiVector3D norm = (initData + i)->mNormals[vid];
                 
                 //Make a 3x3 of the matrix and multiply it by the 3d vector
-                mesh->mVertices[vid] = aiMatrix3x3(mimatrix) * vert + aiVector3D(mimatrix.a4, mimatrix.b4, mimatrix.c4);
-                mesh->mNormals[vid] = aiMatrix3x3(normalMatrix) * norm + aiVector3D(normalMatrix.a4, normalMatrix.b4, normalMatrix.c4);
+                mesh->mVertices[vid] += (aiMatrix3x3(mimatrix) * vert + aiVector3D(mimatrix.a4, mimatrix.b4, mimatrix.c4)) * bone->mWeights[k].mWeight;
+                mesh->mNormals[vid] += (aiMatrix3x3(normalMatrix) * norm + aiVector3D(normalMatrix.a4, normalMatrix.b4, normalMatrix.c4)) * bone->mWeights[k].mWeight;
             }
         }
     }
@@ -376,7 +390,12 @@ void update(int value)
         glutTimerFunc(timeStep, update, 0);
         currTick++;
     }
-
+    z_floor_close -= 10;
+    z_floor_far -= 10;
+    if(z_floor_far == 0) {
+        z_floor_close = -5000;
+        z_floor_far = 5000;
+    }
     glutPostRedisplay();
 }
 
@@ -396,7 +415,7 @@ void drawFloor()
     glNormal3f(0, 1, 0);
     for(int x = -5000; x <= 5000; x += 50)
     {
-        for(int z = -5000; z <= 5000; z += 50)
+        for(int z = z_floor_close; z <= z_floor_far; z += 50)
         {
             if(flag) glColor3f(0.2, 1.0, 0.4);
             else glColor3f(0.7, 1.0, 0.9);

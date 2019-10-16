@@ -31,12 +31,21 @@ float timeStep = 50; //Animation time step = 50 m.sec
 bool embeddedAnimation = false;
 bool reTargetedAnimation = false;
 
+std::map<string, string> animationRemapping
+{
+    {"rThigh", "lhip"},
+    {"lThigh", "rhip"},
+    {"rShin", "lknee"},
+    {"lShin", "rknee"},
+    {"rFoot", "lankle"},
+    {"lFoot", "rankle"},
+};
+
 //---------Camera Variables--------------------
 float radius = 3, angle=0, look_x, look_y = 0, look_z=0, eye_x = 0, eye_y = 0, eye_z = radius, prev_eye_x = eye_x, prev_eye_z=eye_z;  //Camera parameters
 
 //------------Modify the following as needed----------------------
 float materialCol[4] = { 0.9, 0.9, 0.9, 1 };   //Default material colour (not used if model's colour is available)
-float defaultColor[4] = { 0.5, 0.2, 0.7, 1 };
 bool replaceCol = true;                       //Change to 'true' to set the model's colour to the above colour
 float lightPosn[4] = { 0, 50, 50, 1 };         //Default light's position
 bool twoSidedLight = false;                    //Change to 'true' to enable two-sided lighting
@@ -158,7 +167,7 @@ void loadGLTextures(const aiScene* scene)
 }
 
 // ------A recursive function to traverse scene graph and render each mesh----------
-void render (const aiScene* sc, const aiNode* nd)
+void render (const aiScene* sc, const aiNode* nd, bool shadow)
 {
     aiMatrix4x4 m = nd->mTransformation;
     aiMesh* mesh;
@@ -186,7 +195,10 @@ void render (const aiScene* sc, const aiNode* nd)
             glBindTexture(GL_TEXTURE_2D, texIdMap[materialIndex]);
         }
         
-        if (replaceCol) 
+        if(shadow) {
+            glColor4f(0, 0, 0, 1.0);
+        }
+        else if (replaceCol) 
             glColor4fv(materialCol);   //User-defined colour
         else if (AI_SUCCESS == aiGetMaterialColor(mtl, AI_MATKEY_COLOR_DIFFUSE, &diffuse))  //Get material colour from model
             glColor4f(diffuse.r, diffuse.g, diffuse.b, 1.0);
@@ -231,7 +243,7 @@ void render (const aiScene* sc, const aiNode* nd)
 
     // Draw all children
     for (int i = 0; i < nd->mNumChildren; i++)
-        render(sc, nd->mChildren[i]);
+        render(sc, nd->mChildren[i], shadow);
 
     glPopMatrix();
 }
@@ -255,8 +267,9 @@ void initialise()
     glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
     glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, white);
     glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 50);
+    //glColor4fv(materialCol);
     loadModel("dwarf.x"); //<<<-------------Specify input file name here
-    //loadAnimation("avatar_walk.bvh");
+    loadAnimation("avatar_walk.bvh");
     loadGLTextures(scene);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
@@ -269,6 +282,7 @@ void transformVertices()
     for (int i = 0; i < scene->mNumMeshes; i++)
     {
         aiMesh* mesh = scene->mMeshes[i];
+        
         for (int j = 0; j < mesh->mNumBones; j++)
         {
             aiBone* bone = mesh->mBones[j];
@@ -313,6 +327,18 @@ void updateNodeMatrices(int tick)
         matPos = aiMatrix4x4(); //Identity
         matRot = aiMatrix4x4();
         aiNodeAnim* channel = anim->mChannels[i]; //Channel
+        
+        if(reTargetedAnimation) {
+            //aiAnimation* newAnim = animationScene->mAnimations[0];
+            for (int j = 0; j < scene->mAnimations[0]->mNumChannels; j++)
+            {
+                if(scene->mAnimations[0]->mChannels[j]->mNodeName.data == animationRemapping[channel->mNodeName.data]) {
+                    channel = scene->mAnimations[0]->mChannels[j];
+                    break;
+                }
+            }
+        }
+        
         aiVector3D posn;
         
         // Position Keys
@@ -320,8 +346,8 @@ void updateNodeMatrices(int tick)
             for (int positionIndex = 0; positionIndex < channel->mNumPositionKeys; positionIndex++)
             {
                 if(tick < channel->mPositionKeys[positionIndex].mTime) {
-                    aiVector3D   pos1 = (channel->mPositionKeys[positionIndex-1]).mValue;
-                    aiVector3D   pos2 = (channel->mPositionKeys[positionIndex]).mValue;
+                    aiVector3D  pos1 = (channel->mPositionKeys[positionIndex-1]).mValue;
+                    aiVector3D  pos2 = (channel->mPositionKeys[positionIndex]).mValue;
                     double time1 = (channel->mPositionKeys[positionIndex-1]).mTime;
                     double time2 = (channel->mPositionKeys[positionIndex]).mTime;
                     float factor = (tick-time1)/(time2-time1);
@@ -340,6 +366,12 @@ void updateNodeMatrices(int tick)
         }
         
         aiQuaternion rotn;
+        
+         if(reTargetedAnimation) {
+             anim = animationScene->mAnimations[0];
+         }
+         
+         channel = anim->mChannels[i]; //Channel
         
         // Rotation Keys
         if (channel->mNumRotationKeys > 1) {
@@ -369,7 +401,14 @@ void updateNodeMatrices(int tick)
         
         matProd = matPos * matRot;
         nd = scene->mRootNode->FindNode(channel->mNodeName);
-        nd->mTransformation = matProd;
+        
+        if(reTargetedAnimation) {
+             nd = scene->mRootNode->FindNode(aiString(animationRemapping[channel->mNodeName.data]));
+        }
+        if(nd != NULL) {
+            nd->mTransformation = matProd;
+        }
+        
     }
     transformVertices();
 }
@@ -391,9 +430,18 @@ void update(int value)
             embeddedAnimation = false;
         }
     } else if(reTargetedAnimation) {
-        
-        glutTimerFunc(timeStep, update, 0);
-    
+        tDuration = animationScene->mAnimations[0]->mDuration;
+        if (currTick < tDuration)
+        {
+            updateNodeMatrices(currTick);
+            glutTimerFunc(timeStep, update, 0);
+            currTick++;
+        } 
+        else {
+            currTick = 0;
+            glutTimerFunc(timeStep, update, 0);
+            reTargetedAnimation = false;
+        }
     } else {
         glutTimerFunc(timeStep, update, 0);
     }
@@ -404,7 +452,7 @@ void update(int value)
 void keyboard(unsigned char key, int x, int y)
 {
     if(key == '1') embeddedAnimation = !embeddedAnimation; 
-    if(key == '2') reTargetedAnimation = !reTargetedAnimation;  //Enable/disable initial model rotation 
+    if(key == '2') reTargetedAnimation = !reTargetedAnimation; 
     glutPostRedisplay();
 }
 
@@ -459,7 +507,6 @@ void display()
     glTranslatef(-xc, -yc, -zc);
     
     glPushMatrix();
-    glColor4f(1.0, 1.0, 1.0, 1.0);
     drawFloor();
     glPopMatrix();
     
@@ -467,15 +514,14 @@ void display()
     glPushMatrix();
     glTranslatef(0, 0.1, 0);
     glMultMatrixf(shadowMatrix);
-    glColor4f(0.2, 0.2, 0.2, 1.0); 
-    render(scene, scene->mRootNode);
+    glTranslatef(-xc, -yc, -zc);
+    render(scene, scene->mRootNode, true);
     glPopMatrix();
 
     glEnable(GL_LIGHTING);
     glPushMatrix();
-    render(scene, scene->mRootNode);
+    render(scene, scene->mRootNode, false);
     glPopMatrix();
-    
 
     glutSwapBuffers();
 }
