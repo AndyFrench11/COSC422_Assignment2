@@ -491,7 +491,7 @@ void display()
 
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    gluLookAt(eye_x, eye_y, eye_z,  look_x, look_y, look_z,   0, 1, 0);
+    gluLookAt(eye_x, eye_y, eye_z + (dwarf_z * 0.014),  look_x, look_y, look_z + (dwarf_z * 0.014),   0, 1, 0);
     glLightfv(GL_LIGHT0, GL_POSITION, lightPosn);
 
     //glRotatef(angle, 0.f, 1.f ,0.f);  //Continuous rotation about the y-axis
@@ -519,8 +519,8 @@ void display()
     glPushMatrix();
     glTranslatef(0, 0.1, 0);
     glMultMatrixf(shadowMatrix);
+    glScalef(1, 0.5, 1);
     glTranslatef(0, 0, dwarf_z);
-    glTranslatef(-xc, -yc, -zc);
     render(scene, scene->mRootNode, true);
     glPopMatrix();
 
