@@ -30,9 +30,16 @@ int tDuration; //Animation duration in ticks.
 int currTick = 0; //current tick
 float timeStep = 50; //Animation time step = 50 m.sec
 
-//~ gluLookAt(0, 0, 3, 0, 0, -5, 0, 1, 0);
+
 //---------Camera Variables--------------------
 float radius = 3, angle=0, look_x, look_y = 0, look_z=0, eye_x = 0, eye_y = 0, eye_z = radius, prev_eye_x = eye_x, prev_eye_z=eye_z;  //Camera parameters
+
+//---------Floor Variables---------------------
+int z_floor_close = -5000, z_floor_far = 5000;
+int floor_shift = 1;
+
+//---------Model Position Variables---------------------
+int z_model = 0;
 
 //------------Modify the following as needed----------------------
 float materialCol[4] = { 0.5, 0.4, 0.3, 1 };   //Default material colour (not used if model's colour is available)
@@ -334,6 +341,14 @@ void update(int value)
         glutTimerFunc(timeStep, update, 0);
         currTick++;
     }
+    
+    z_model += 50;
+  
+    if(z_model > (2500 * floor_shift)) {
+        floor_shift++;
+        z_floor_far += 7500;
+        
+    }
 
     glutPostRedisplay();
 }
@@ -357,14 +372,15 @@ void keyboard(unsigned char key, int x, int y)
 
 void drawFloor()
 {
-    bool flag = false;
+    bool flag = true;
 
     glBegin(GL_QUADS);
     glNormal3f(0, 1, 0);
     for(int x = -5000; x <= 5000; x += 50)
     {
-        for(int z = -5000; z <= 5000; z += 50)
+        for(int z = z_floor_close; z <= z_floor_far; z += 50)
         {
+            
             if(flag) glColor3f(0.1, 1.0, 0.3);
             else glColor3f(0.7, 1.0, 0.5);
             glVertex3f(x, 0, z);
@@ -386,7 +402,8 @@ void display()
 
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    gluLookAt(eye_x, eye_y, eye_z,  look_x, look_y, look_z,   0, 1, 0);
+    gluLookAt(eye_x, eye_y, eye_z + (z_model * 0.00165) ,  look_x, look_y, look_z + (z_model * 0.00165),  0, 1, 0);
+    //gluLookAt(eye_x, eye_y, eye_z,  look_x, look_y, look_z,   0, 1, 0);
     
     glLightfv(GL_LIGHT0, GL_POSITION, lightPosn);
 
@@ -406,11 +423,15 @@ void display()
     // center the model
     glTranslatef(-xc, -yc, -zc);
     
+    //glDisable(GL_TEXTURE_2D);
+    glPushMatrix();
+    glScalef(2, 1, 2);
     drawFloor();
+    glPopMatrix();
     
     glPushMatrix();
-    glRotatef(-90, 1.0f, 0 ,0);  //Continuous rotation about the y-axis
-    //glTranslatef(0, 0, 0);
+    glTranslatef(0, 0, z_model);
+    glRotatef(-90, 1.0f, 0 ,0);  
     render(modelScene, modelScene->mRootNode);
     glPopMatrix();
     

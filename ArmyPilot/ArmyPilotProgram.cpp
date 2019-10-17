@@ -27,13 +27,17 @@ std::map<int, int> texIdMap;
 //---------Animation Variables-----------------
 int tDuration; //Animation duration in ticks.
 int currTick = 0; //current tick
-float timeStep = 50; //Animation time step = 50 m.sec
+float timeStep = 20; //Animation time step = 50 m.sec
 
 //---------Camera Variables--------------------
-float radius = 3, angle=0, look_x, look_y = 0, look_z=0, eye_x = 0, eye_y = 0, eye_z = radius, prev_eye_x = eye_x, prev_eye_z=eye_z;  //Camera parameters
+float radius = 3, angle=0, look_x, look_y = 0, look_z=0, eye_x = 0, eye_y = 0, eye_z = radius; //Camera parameters
 
 //---------Floor Variables---------------------
 int z_floor_close = -5000, z_floor_far = 5000;
+int floor_shift = 1;
+
+//---------Model Position Variables---------------------
+int z_model = 0;
 
 //------------Modify the following as needed----------------------
 float materialCol[4] = { 0.9, 0.9, 0.9, 1 };   //Default material colour (not used if model's colour is available)
@@ -390,11 +394,13 @@ void update(int value)
         glutTimerFunc(timeStep, update, 0);
         currTick++;
     }
-    z_floor_close -= 10;
-    z_floor_far -= 10;
-    if(z_floor_far == 0) {
-        z_floor_close = -5000;
-        z_floor_far = 5000;
+    z_model += 3;
+  
+    if(z_model > (2500 * floor_shift)) {
+        floor_shift++;
+        z_floor_close += 2500;
+        z_floor_far += 7500;
+        
     }
     glutPostRedisplay();
 }
@@ -438,7 +444,7 @@ void display()
 
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    gluLookAt(eye_x, eye_y, eye_z,  look_x, look_y, look_z,   0, 1, 0);
+    gluLookAt(eye_x, eye_y, eye_z + (z_model * 0.0053) ,  look_x, look_y, look_z + (z_model * 0.0053),  0, 1, 0);
     glLightfv(GL_LIGHT0, GL_POSITION, lightPosn);
 
     //glRotatef(angle, 0.f, 1.f ,0.f);  //Continuous rotation about the y-axis
@@ -456,12 +462,22 @@ void display()
     float zc = (scene_min.z + scene_max.z)*0.5;
     // center the model
     
+    
+    
+    //~ glPushMatrix();
+    //~ glTranslatef(-xc, -yc, -zc);
+    
+    //~ glPopMatrix();
+    
+    glDisable(GL_TEXTURE_2D);
     glPushMatrix();
     glTranslatef(-xc, -yc, -zc);
     drawFloor();
     glPopMatrix();
 
+    glEnable(GL_TEXTURE_2D);
     glPushMatrix();
+    glTranslatef(0, 0, z_model);
     glRotatef(90, 0, 0, 1.0f);
     glRotatef(-90, 0, 1.0f, 0);
     glTranslatef(-xc, -yc, -zc);

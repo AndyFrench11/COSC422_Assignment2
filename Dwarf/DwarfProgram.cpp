@@ -44,6 +44,9 @@ std::map<string, string> animationRemapping
 //---------Camera Variables--------------------
 float radius = 3, angle=0, look_x, look_y = 0, look_z=0, eye_x = 0, eye_y = 0, eye_z = radius, prev_eye_x = eye_x, prev_eye_z=eye_z;  //Camera parameters
 
+//--------Model Moving------------------------
+int dwarf_z = 0;
+
 //------------Modify the following as needed----------------------
 float materialCol[4] = { 0.9, 0.9, 0.9, 1 };   //Default material colour (not used if model's colour is available)
 bool replaceCol = true;                       //Change to 'true' to set the model's colour to the above colour
@@ -196,7 +199,7 @@ void render (const aiScene* sc, const aiNode* nd, bool shadow)
         }
         
         if(shadow) {
-            glColor4f(0, 0, 0, 1.0);
+            glColor4f(0.2, 0.2, 0.2, 1.0);
         }
         else if (replaceCol) 
             glColor4fv(materialCol);   //User-defined colour
@@ -436,6 +439,7 @@ void update(int value)
             updateNodeMatrices(currTick);
             glutTimerFunc(timeStep, update, 0);
             currTick++;
+            dwarf_z += 5;
         } 
         else {
             currTick = 0;
@@ -506,6 +510,7 @@ void display()
     // center the model
     glTranslatef(-xc, -yc, -zc);
     
+    glDisable(GL_TEXTURE_2D);
     glPushMatrix();
     drawFloor();
     glPopMatrix();
@@ -514,12 +519,15 @@ void display()
     glPushMatrix();
     glTranslatef(0, 0.1, 0);
     glMultMatrixf(shadowMatrix);
+    glTranslatef(0, 0, dwarf_z);
     glTranslatef(-xc, -yc, -zc);
     render(scene, scene->mRootNode, true);
     glPopMatrix();
 
+    glEnable(GL_TEXTURE_2D);
     glEnable(GL_LIGHTING);
     glPushMatrix();
+    glTranslatef(0, 0, dwarf_z);
     render(scene, scene->mRootNode, false);
     glPopMatrix();
 
